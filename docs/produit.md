@@ -1,6 +1,6 @@
 # JAPPO : modèle produit, phase 1
 
-Statut : proposition (étape 2 de la refonte), à valider avant le modèle de données.
+Statut : validé (étape 2 de la refonte), avec les décisions du § 10.
 Périmètre : structures, coachs, entrepreneurs. Ce document remplace tout ce que le code actuel
 laisse supposer (parcours, phases, missions à quatre niveaux, progression multiple).
 
@@ -23,37 +23,41 @@ laisse supposer (parcours, phases, missions à quatre niveaux, progression multi
 
 ## 2. Vocabulaire
 
-L'interface parle d'entrepreneuriat ; le modèle de données utilise des termes neutres pour
-pouvoir servir plus tard à d'autres formes d'accompagnement (formation par projets, etc.).
+L'interface parle d'entrepreneuriat ; le modèle de données utilise des termes neutres, en anglais
+(voir `docs/modele-donnees.md`, décision N1), pour pouvoir servir plus tard à d'autres formes
+d'accompagnement (formation par projets, etc.).
 
 | Terme de l'interface | Terme du modèle | Définition |
 |---|---|---|
-| **Structure** | organisation | L'incubateur, l'accélérateur ou l'organisme qui accompagne ; toutes les données lui appartiennent et ne sont jamais visibles d'une autre structure. |
-| **Membre** | membre | Une personne dans une structure, avec un rôle unique dans cette structure ; c'est la seule façon de désigner une personne dans tous les modules. |
+| **Structure** | `organization` | L'incubateur, l'accélérateur ou l'organisme qui accompagne ; toutes les données lui appartiennent et ne sont jamais visibles d'une autre structure. |
+| **Membre** | `member` | Une personne dans une structure, avec un rôle unique dans cette structure ; c'est la seule façon de désigner une personne dans tous les modules. |
 | **Admin** | rôle `ADMIN` | Le membre qui pilote la structure : programmes, cohortes, membres, paramètres. |
-| **Coach** | rôle `ACCOMPAGNATEUR` | Le membre qui accompagne les projets de ses cohortes et relit leurs livrables. |
-| **Entrepreneur** | rôle `ACCOMPAGNE` | Le membre accompagné, porteur d'un ou plusieurs projets. |
-| **Programme** | programme | Le modèle d'accompagnement (ex. Pré-incubation), organisé en étapes, sur lequel on lance des cohortes. |
-| **Programme suivant** | programme suivant | Le programme vers lequel on promeut les projets à la fin de celui-ci (ex. Pré-incubation → Incubation). |
-| **Étape** | étape | Une grande partie ordonnée d'un programme (ex. Validation de l'idée). |
-| **Activité** | activité | Ce qu'on fait concrètement dans une étape : une tâche, un atelier, une ressource à consulter ou une séance avec le coach. |
-| **Livrable attendu** | livrable attendu | Ce qu'une activité demande de rendre, facultatif, avec son format : fichier, lien, texte ou document modèle. |
-| **Document modèle** | modèle de document | Un document structuré prêt à remplir dans la plateforme : Business Model Canvas, business plan, pitch deck. |
-| **Cohorte** | cohorte | Un groupe de projets qui suivent un programme ensemble, avec ses dates, ses coachs et sa propre copie du contenu du programme. |
-| **Contenu de la cohorte** | contenu de cohorte | La copie des étapes, activités et livrables attendus faite au lancement de la cohorte (voir § 6.3). |
-| **Planning** | échéances | Les dates limites des activités pour une cohorte, calculées au lancement puis ajustables. |
-| **Projet** | projet | L'entreprise ou l'idée accompagnée, portée par un ou plusieurs entrepreneurs ; il traverse les programmes et garde tout son historique. |
-| **Participation** | participation | Le passage d'un projet dans une cohorte, du début à sa fin (terminé, abandonné, à revoir). |
-| **Livrable** | livrable | Ce qu'un projet rend pour un livrable attendu ; il a un statut, des versions et un fil de commentaires. |
-| **Version** | version de livrable | Un état figé de ce qui a été rendu, à un instant donné ; une version rendue n'est jamais modifiée. |
-| **Commentaire** | commentaire | Un message dans le fil d'un livrable, échangé entre les porteurs du projet et les coachs. |
-| **Promotion** | promotion | Le passage d'un projet vers une cohorte du programme suivant, qui clôt sa participation actuelle. |
+| **Coach** | rôle `FACILITATOR` | Le membre qui accompagne les projets de ses cohortes et relit leurs livrables. |
+| **Entrepreneur** | rôle `PARTICIPANT` | Le membre accompagné, porteur d'un ou plusieurs projets. |
+| **Programme** | `program` | Le modèle d'accompagnement (ex. Pré-incubation), organisé en étapes, sur lequel on lance des cohortes. |
+| **Programme suivant** | `program.next_program_id` | Le programme vers lequel on promeut les projets à la fin de celui-ci (ex. Pré-incubation → Incubation). |
+| **Étape** | `step` | Une grande partie ordonnée d'un programme (ex. Validation de l'idée). |
+| **Activité** | `activity` | Ce qu'on fait concrètement dans une étape : une tâche, un atelier, une ressource à consulter ou une séance avec le coach. |
+| **Livrable attendu** | `activity.deliverable_format` | Ce qu'une activité demande de rendre, facultatif, avec son format : fichier, lien, texte ou document modèle. |
+| **Document modèle** | `document_template` | Un document structuré prêt à remplir dans la plateforme : Business Model Canvas, business plan, pitch deck. |
+| **Cohorte** | `cohort` | Un groupe de projets qui suivent un programme ensemble, avec ses dates, ses coachs et sa propre copie du contenu du programme. |
+| **Contenu de la cohorte** | `cohort_step`, `cohort_activity` | La copie des étapes, activités et livrables attendus faite au lancement de la cohorte (voir § 6.3), plus les activités propres à la cohorte. |
+| **Activité de cohorte** | `cohort_activity` (origine `COHORT`) | Une activité ajoutée par un coach pour toute une cohorte, sans modifier le programme. |
+| **Activité ponctuelle** | `cohort_activity` (origine `ENROLLMENT`) | Une activité ajoutée par un coach pour un seul projet de sa cohorte. |
+| **Planning** | `due_offset_days`, `due_date_override` | Les dates limites des activités pour une cohorte, calculées au lancement puis ajustables. |
+| **Porteur** | `project_holder` | Un entrepreneur membre de la structure qui porte un projet ; un projet peut en avoir plusieurs. |
+| **Projet** | `project` | L'entreprise ou l'idée accompagnée, portée par un ou plusieurs entrepreneurs ; il traverse les programmes et garde tout son historique. |
+| **Participation** | `enrollment` | Le passage d'un projet dans une cohorte, du début à sa fin (terminé, abandonné, à revoir). |
+| **Livrable** | `deliverable` | Ce qu'un projet rend pour un livrable attendu ; il a un statut, des versions et un fil de commentaires. |
+| **Version** | `deliverable_version` | Un état figé de ce qui a été rendu, à un instant donné ; une version rendue n'est jamais modifiée. |
+| **Commentaire** | `deliverable_comment` | Un message dans le fil d'un livrable, échangé entre les porteurs du projet et les coachs. |
+| **Promotion** | `enrollment.promoted_to_enrollment_id` | Le passage d'un projet vers une cohorte du programme suivant, qui clôt sa participation actuelle. |
 | **Chemin du projet** | (affichage) | La suite des programmes traversés par un projet, déduite de ses participations ; ce n'est pas une donnée stockée. |
-| **Ressource** | ressource | Un fichier ou un lien de la bibliothèque de la structure, joint à des activités. |
-| **Séance** | réunion | Un rendez-vous en visio (LiveKit) ou en présentiel entre un coach et un ou plusieurs projets. |
-| **Invitation** | invitation | La seule façon de faire entrer une personne dans une structure : un email, un rôle, et pour un entrepreneur, la cohorte et le projet visés. |
+| **Ressource** | `resource` | Un fichier ou un lien de la bibliothèque de la structure, joint à des activités. |
+| **Séance** | `meeting` | Un rendez-vous en visio (LiveKit) ou en présentiel entre un coach et un ou plusieurs projets. |
+| **Invitation** | `invitation` | La seule façon de faire entrer une personne dans une structure : un email, un rôle, et pour un entrepreneur, la cohorte et le projet visés. |
 
-Les concepts **Parcours**, **Phase** et **Mission** disparaissent (voir § 9, décision D1).
+Les concepts **Parcours**, **Phase** et **Mission** disparaissent (voir § 10, décision D1).
 
 ---
 
@@ -84,7 +88,7 @@ les membres, l'abonnement et la consommation de l'assistant IA.
 - Éditer le contenu des programmes dont il est éditeur.
 - Sur les cohortes dont il est coach : inviter des entrepreneurs, ajuster le planning, relire,
   commenter, demander une correction, valider un livrable, marquer une activité comme faite ou
-  non faite, planifier des séances, ajouter une activité ponctuelle à un projet (§ 6.5).
+  non faite, planifier des séances, ajouter des activités de cohorte et des activités ponctuelles (§ 6.5).
 - Utiliser l'assistant IA (selon l'abonnement).
 
 **Voit** : tous les programmes de la structure en lecture (pour connaître le contenu) ; seulement
@@ -117,8 +121,8 @@ conservée et seulement adaptée au nouveau modèle.
 
 | Rôle | Barre latérale |
 |---|---|
-| Admin | Accueil · **Programmes** (la liste des programmes, dans l'ordre de leur chaîne, et « + Nouveau programme ») · Paramètres |
-| Coach | Accueil · **Programmes** (idem, sans création) |
+| Admin | Accueil · **Programmes** (la liste des programmes, dans l'ordre de leur chaîne, et « + Nouveau programme ») · Projets · Paramètres |
+| Coach | Accueil · **Programmes** (idem, sans création) · Projets |
 | Entrepreneur | Mon parcours |
 
 Toujours présents : recherche **⌘K** (programmes, cohortes, projets, membres, activités, actions),
@@ -274,10 +278,16 @@ les modifications** à une cohorte.
   la mention « Retirée du programme » et devient facultative : rien de ce qui a été rendu ne se
   perd.
 - Les échéances déjà ajustées à la main dans la cohorte ne sont pas écrasées.
+- Les activités de cohorte et les activités ponctuelles ne sont jamais touchées.
 
 **Ce qu'on peut changer directement dans une cohorte** : son planning (les échéances), ses coachs,
-ses dates, et des activités ponctuelles pour un projet (§ 6.5). Pas sa structure d'étapes : une
-seule façon de modifier le contenu, c'est le programme.
+ses dates, et des activités supplémentaires (§ 6.5) :
+- des **activités de cohorte**, pour toute la cohorte, ajoutées dans une de ses étapes ;
+- des **activités ponctuelles**, pour un seul projet.
+
+Elles se créent, se modifient, se réorganisent et se suppriment dans la cohorte, avec les mêmes
+gestes que dans le programme, et n'existent que là. Les étapes et les activités issues du
+programme ne se modifient que dans le programme : une seule façon de changer le modèle.
 
 ### 6.4 Cohorte
 
@@ -310,10 +320,12 @@ seule façon de modifier le contenu, c'est le programme.
   le programme suivant, ou réintégration dans une cohorte en cours du même programme ;
   Abandonné → réintégration. Chaque transition garde la date, l'auteur et un motif facultatif.
 - Le statut du projet n'est pas stocké : la fiche affiche celui de sa dernière participation.
-- **Activité ponctuelle** : un coach peut ajouter à un projet une activité qui n'existe que pour
-  lui, dans une étape de sa cohorte (ex. « Refaire l'étude de prix »). Elle se comporte comme
-  une activité normale (livrable, échéance, progression). Elle remplace les anciennes « missions
-  assignées » (décision D1).
+- **Activités supplémentaires** : un coach peut ajouter, dans une étape de sa cohorte,
+  - une **activité de cohorte**, pour tous les projets de la cohorte (ex. « Atelier fiscalité ») ;
+  - une **activité ponctuelle**, pour un seul projet (ex. « Refaire l'étude de prix »).
+
+  Elles se comportent comme des activités normales (livrable, échéance, progression).
+  L'activité ponctuelle remplace les anciennes « missions assignées » (décision D1).
 
 ### 6.6 Promotion
 
@@ -361,7 +373,7 @@ La progression n'est jamais stockée : elle se calcule à partir des activités 
   - avec livrable attendu : le livrable est **Validé** ;
   - sans livrable attendu : un porteur ou un coach l'a **marquée faite**.
 - **Progression d'une participation** = activités obligatoires terminées ÷ activités obligatoires
-  du contenu de la cohorte (activités ponctuelles du projet incluses). Les activités facultatives
+  du contenu de la cohorte (activités de cohorte et activités ponctuelles du projet incluses). Les activités facultatives
   ne comptent pas, sauf si elles sont terminées : elles apparaissent alors en bonus, sans changer
   le pourcentage.
 - **Étape en cours** : la première étape (dans l'ordre) qui contient une activité obligatoire non
@@ -428,7 +440,8 @@ Les dates s'évaluent dans le fuseau horaire de la structure (Africa/Dakar par d
 | Demander une correction, valider, rouvrir | ✓ | ses cohortes | — |
 | Commenter un livrable | ✓ | ses cohortes | porteur |
 | Marquer une activité faite (sans livrable) | ✓ | ses cohortes | porteur |
-| Ajouter une activité ponctuelle à un projet | ✓ | ses cohortes | — |
+| Ajouter une activité de cohorte ou une activité ponctuelle | ✓ | ses cohortes | — |
+| Voir le tableau des projets, l'exporter en CSV | tous les projets | projets de ses cohortes | — |
 | Planifier une séance | ✓ | ses cohortes | — |
 | Gérer la bibliothèque de ressources | ✓ | ✓ | — |
 | Assistant IA | ✓ | ✓ | — |
@@ -440,7 +453,7 @@ Toutes ces règles sont vérifiées côté serveur, sur chaque route.
 
 ## 7. Écrans
 
-**Sept écrans en tout.** Tout le reste est un panneau latéral (adressable par l'URL) ou une
+**Huit écrans en tout.** Tout le reste est un panneau latéral (adressable par l'URL) ou une
 fenêtre de confirmation.
 
 | # | Écran | Rôles | Ce qu'on y fait | Pourquoi ce n'est pas un panneau ou une section d'un autre écran |
@@ -451,7 +464,8 @@ fenêtre de confirmation.
 | 4 | **Mon parcours** | entrepreneur | Voir où il en est et quoi faire maintenant, ouvrir ses activités et livrables en panneaux. | C'est le point d'entrée de l'entrepreneur ; il n'a pas d'autre écran dans lequel le placer. |
 | 5 | **Document** | entrepreneur (édition), coach et admin (lecture et commentaires) | Remplir un Business Model Canvas, un business plan ou un pitch deck ; enregistrement automatique ; rendre. | Un canevas à 9 blocs, un plan long ou des diapositives demandent tout l'écran et un mode concentré ; un panneau serait trop étroit. |
 | 6 | **Séance** | participants | La salle de visio LiveKit. | La vidéo occupe tout l'écran et doit rester ouverte pendant la séance, indépendamment de la navigation. |
-| 7 | **Paramètres de la structure** | admin | Sections : Profil, Membres et invitations, Accompagnement (seuils § 6.9), Abonnement et consommation IA. | Plusieurs sections administratives avec des tableaux (membres) ; rarement visitées ; trop larges pour un panneau et sans lien avec un programme. |
+| 7 | **Projets** | admin, coach | Le tableau de tous les projets de la structure (le coach : ceux de ses cohortes), y compris terminés, à revoir et abandonnés. Filtres, tri, colonnes au choix, export CSV. Un clic ouvre le panneau du projet. | Il traverse tous les programmes et toutes les cohortes : aucun autre écran ne le contient. Un tableau filtrable de plusieurs dizaines de lignes, avec ses colonnes, a besoin de toute la largeur. |
+| 8 | **Paramètres de la structure** | admin | Sections : Profil, Membres et invitations, Accompagnement (seuils § 6.9), Abonnement et consommation IA. | Plusieurs sections administratives avec des tableaux (membres) ; rarement visitées ; trop larges pour un panneau et sans lien avec un programme. |
 
 La console du super-admin reste un écran à part, hors refonte.
 
@@ -473,12 +487,26 @@ change pas.
 **Onglet Contenu** : l'éditeur décrit au § 5.2. Le menu « … » du programme donne : Renommer,
 Programme suivant, Coachs éditeurs, Dupliquer, Archiver.
 
-### 7.2 Panneaux
+### 7.2 L'écran Projets en détail
+
+- **Colonnes disponibles** : projet, porteurs, programme, cohorte, étape en cours, progression,
+  statut de la participation, livrables en retard, retours en attente, bloqué depuis (jours),
+  dernière activité, coachs. Par défaut : projet, programme, cohorte, étape en cours, progression,
+  statut. Le choix des colonnes est mémorisé pour chaque utilisateur.
+- **Filtres** : programme, cohorte, statut (en cours, terminé, à revoir, abandonné), en retard,
+  bloqué ; recherche par nom de projet ou de porteur. Les filtres se reflètent dans l'URL.
+- **Tri** sur chaque colonne ; **pagination** côté serveur.
+- **Export CSV** : toutes les lignes correspondant aux filtres en cours, avec les colonnes
+  affichées, dans la limite des droits de l'utilisateur.
+- Chaque projet apparaît avec sa participation la plus récente ; son historique complet est dans
+  le panneau.
+
+### 7.3 Panneaux
 
 | Panneau | Ouvert depuis | Contenu |
 |---|---|---|
-| **Cohorte** | Programme, Accueil, ⌘K | Projets (avec progression et étape en cours), invitations en attente, planning, coachs, différences avec le programme, actions : inviter, promouvoir, clore. |
-| **Projet** | Programme, cohorte, alertes, ⌘K | Chemin du projet, porteurs, progression par étape, livrables, activités ponctuelles, historique des participations, statut. |
+| **Cohorte** | Programme, Accueil, ⌘K | Projets (avec progression et étape en cours), invitations en attente, planning, coachs, activités de cohorte, différences avec le programme, actions : inviter, promouvoir, clore. |
+| **Projet** | Projets, programme, cohorte, alertes, ⌘K | Chemin du projet, porteurs, progression par étape, livrables, activités ponctuelles, historique des participations, statut. |
 | **Activité** | Contenu du programme, Mon parcours | Consigne, ressources, échéance, livrable attendu ; côté entrepreneur : « Marquer comme fait » ou « Rendre ». |
 | **Livrable** | Projet, Accueil, alertes, Mon parcours | Statut, versions, fil de commentaires, actions selon le rôle. |
 | **Membre** | Paramètres, cohorte, ⌘K | Rôle, cohortes, projets, invitation. |
@@ -543,7 +571,7 @@ Ce cas sert de fil rouge et sera reproduit à l'identique dans les données de d
 | Programme | Cohorte | Statut | Projets |
 |---|---|---|---|
 | Pré-incubation | Cohorte 2026-A | Terminée | 6 projets : 3 **promus** vers Incubation, 1 **terminé**, 1 **à revoir**, 1 **abandonné** |
-| Pré-incubation | Cohorte 2026-B | En cours | 5 projets à différentes étapes, avec : 2 livrables en retard, 1 projet bloqué, 3 livrables rendus en attente de retour (dont 1 au-delà du délai), 1 livrable à corriger |
+| Pré-incubation | Cohorte 2026-B | En cours | 5 projets à différentes étapes, avec : 2 livrables en retard, 1 projet bloqué, 3 livrables rendus en attente de retour (dont 1 au-delà du délai), 1 livrable à corriger ; 1 activité de cohorte (« Atelier fiscalité ») et 1 activité ponctuelle pour un projet |
 | Pré-incubation | Cohorte 2027-A | À venir | 2 invitations en attente |
 | Incubation | Cohorte 2026 | En cours | Les 3 projets promus depuis la 2026-A (leur chemin affiche « Pré-incubation ✓ → Incubation (en cours) ») et 1 projet entré directement |
 | Post-incubation / Accélération | Cohorte 2027 | À venir | aucun projet |
@@ -553,22 +581,22 @@ pitch deck remplis, avec plusieurs versions et un fil de commentaires.
 
 ---
 
-## 10. Décisions proposées, à valider
+## 10. Décisions
 
-Ces points découlent de vos décisions mais n'y étaient pas tranchés explicitement.
+Ces points découlaient des consignes sans y être tranchés. État après relecture (20/11/2026).
 
-| # | Décision proposée | Raison |
-|---|---|---|
-| D1 | **Les « missions » disparaissent** comme notion : ce qu'on fait est une **activité**. Les anciennes missions assignées à un projet deviennent des **activités ponctuelles** (§ 6.5). | Une seule façon de décrire le travail à faire ; le module « missions » est conservé dans son usage, pas comme concept séparé. |
-| D2 | **Le contenu d'une cohorte ne se modifie pas directement** : seulement via le programme et « appliquer les modifications ». Le planning, les coachs et les activités ponctuelles, eux, se modifient dans la cohorte. | Une seule façon de modifier le contenu ; évite qu'une cohorte diverge sans qu'on le sache. |
-| D3 | **Pas d'écran « liste des programmes »** : la barre latérale est la liste. | Moins d'écrans ; le nombre de programmes par structure reste faible. |
-| D4 | **Pas d'écran « Projets »** en phase 1 : on trouve un projet par son programme, sa cohorte ou ⌘K (y compris les projets terminés, à revoir ou abandonnés). | Moins d'écrans. À rouvrir si les structures ont beaucoup de projets hors cohorte. |
-| D5 | **Ressources** : une bibliothèque en panneau, pas d'écran dédié. | Les ressources servent dans les activités ; on les gère là où on les utilise. |
-| D6 | **Coachs éditeurs** : un coach n'édite le contenu d'un programme que si l'admin l'a désigné éditeur. | Évite que tous les coachs modifient le modèle commun. |
-| D7 | **Le coach peut inviter des entrepreneurs** dans ses cohortes, pas des coachs ni des admins. | Correspond à la pratique ; reste un seul mécanisme d'invitation. |
-| D8 | **Invitations nominatives uniquement** (pas de lien anonyme partageable). | Plus sûr ; un seul mécanisme. |
-| D9 | **Le super-admin n'accède pas au contenu** d'accompagnement des structures. | Confidentialité des données des structures. |
-| D10 | **Hors phase 1** : export PDF des documents, notes internes des coachs sur un projet, durée prévue par étape (seuil de blocage par étape), visibilité entre projets d'une même cohorte. | Garder la phase 1 resserrée. |
+| # | Décision | État | Raison |
+|---|---|---|---|
+| D1 | **Les « missions » disparaissent** comme notion : ce qu'on fait est une **activité**. Les anciennes missions assignées à un projet deviennent des **activités ponctuelles** (§ 6.5). | Validée | Une seule façon de décrire le travail à faire ; le module « missions » est conservé dans son usage, pas comme concept séparé. |
+| D2 | **Le contenu issu du programme ne se modifie pas dans la cohorte** : seulement via le programme et « appliquer les modifications ». Dans la cohorte, on ajuste le planning et les coachs, et on ajoute des **activités de cohorte** (pour toute la cohorte) et des **activités ponctuelles** (pour un projet). | Validée, avec l'ajout des activités de cohorte | Une seule façon de modifier le modèle, tout en laissant le coach adapter sa cohorte. |
+| D3 | **Pas d'écran « liste des programmes »** : la barre latérale est la liste. | Validée | Moins d'écrans ; le nombre de programmes par structure reste faible. |
+| D4 | **Écran Projets** : tableau de tous les projets (le coach : ceux de ses cohortes), filtres, tri, colonnes au choix, export CSV ; détail en panneau. | Proposition initiale refusée, remplacée par l'écran Projets (§ 7) | Retrouver et suivre les projets à travers tous les programmes ; c'est le 8ᵉ écran. |
+| D5 | **Ressources** : une bibliothèque en panneau, pas d'écran dédié. | Adoptée (pas de remarque) | Les ressources servent dans les activités ; on les gère là où on les utilise. |
+| D6 | **Coachs éditeurs** : un coach n'édite le contenu d'un programme que si l'admin l'a désigné éditeur. | Validée | Évite que tous les coachs modifient le modèle commun. |
+| D7 | **Le coach peut inviter des entrepreneurs** dans ses cohortes, pas des coachs ni des admins. | Validée | Correspond à la pratique ; reste un seul mécanisme d'invitation. |
+| D8 | **Invitations nominatives uniquement** (pas de lien anonyme partageable). | Adoptée (pas de remarque) | Plus sûr ; un seul mécanisme. |
+| D9 | **Le super-admin n'accède pas au contenu** d'accompagnement des structures. | Adoptée (pas de remarque) | Confidentialité des données des structures. |
+| D10 | **Hors phase 1** : export PDF des documents, notes internes des coachs sur un projet, durée prévue par étape (seuil de blocage par étape), visibilité entre projets d'une même cohorte. | Validée | Garder la phase 1 resserrée. |
 
 **Prévu dans le modèle de données sans être construit** (étape 3) : coach indépendant (une
 structure d'une seule personne), catalogue public (un programme « publiable »), bailleurs (une
