@@ -591,11 +591,11 @@ Ces points découlaient des consignes sans y être tranchés. État après relec
 | D2 | **Le contenu issu du programme ne se modifie pas dans la cohorte** : seulement via le programme et « appliquer les modifications ». Dans la cohorte, on ajuste le planning et les coachs, et on ajoute des **activités de cohorte** (pour toute la cohorte) et des **activités ponctuelles** (pour un projet). | Validée, avec l'ajout des activités de cohorte | Une seule façon de modifier le modèle, tout en laissant le coach adapter sa cohorte. |
 | D3 | **Pas d'écran « liste des programmes »** : la barre latérale est la liste. | Validée | Moins d'écrans ; le nombre de programmes par structure reste faible. |
 | D4 | **Écran Projets** : tableau de tous les projets (le coach : ceux de ses cohortes), filtres, tri, colonnes au choix, export CSV ; détail en panneau. | Proposition initiale refusée, remplacée par l'écran Projets (§ 7) | Retrouver et suivre les projets à travers tous les programmes ; c'est le 8ᵉ écran. |
-| D5 | **Ressources** : une bibliothèque en panneau, pas d'écran dédié. | Adoptée (pas de remarque) | Les ressources servent dans les activités ; on les gère là où on les utilise. |
+| D5 | **Ressources** : une bibliothèque en panneau, pas d'écran dédié. | Validée | Les ressources servent dans les activités ; on les gère là où on les utilise. |
 | D6 | **Coachs éditeurs** : un coach n'édite le contenu d'un programme que si l'admin l'a désigné éditeur. | Validée | Évite que tous les coachs modifient le modèle commun. |
 | D7 | **Le coach peut inviter des entrepreneurs** dans ses cohortes, pas des coachs ni des admins. | Validée | Correspond à la pratique ; reste un seul mécanisme d'invitation. |
-| D8 | **Invitations nominatives uniquement** (pas de lien anonyme partageable). | Adoptée (pas de remarque) | Plus sûr ; un seul mécanisme. |
-| D9 | **Le super-admin n'accède pas au contenu** d'accompagnement des structures. | Adoptée (pas de remarque) | Confidentialité des données des structures. |
+| D8 | **Invitations nominatives uniquement** (pas de lien anonyme partageable). | Validée | Plus sûr ; un seul mécanisme. |
+| D9 | **Le super-admin n'accède pas au contenu** d'accompagnement des structures. | Validée | Confidentialité des données des structures. |
 | D10 | **Hors phase 1** : export PDF des documents, notes internes des coachs sur un projet, durée prévue par étape (seuil de blocage par étape), visibilité entre projets d'une même cohorte. | Validée | Garder la phase 1 resserrée. |
 
 **Prévu dans le modèle de données sans être construit** (étape 3) : coach indépendant (une

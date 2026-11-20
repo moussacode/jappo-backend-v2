@@ -1,6 +1,7 @@
 # JAPPO : modèle de données v2 (étape 3)
 
-Statut : proposition, à valider avant l'architecture de l'API (étape 4).
+Statut : validé (y compris N1), complété le 20/11/2026 : règles de suppression (§ 12),
+performance mesurée (§ 13), identifiants UUID (§ 14), isolation hors Hibernate (§ 15).
 Source : `docs/produit.md` (validé). Schéma SQL complet : [`docs/schema-v1.sql`](schema-v1.sql),
 chargé et testé sur MySQL 8.4 (voir § 9). Il deviendra la nouvelle migration Flyway V1 à
 l'étape 6 ; d'ici là, l'application actuelle continue de tourner sur l'ancien schéma.
@@ -197,7 +198,7 @@ pas répétées dans les diagrammes. Le détail de chaque colonne et contrainte 
 
 | Table | Rôle | Choix |
 |---|---|---|
-| `program` | Le programme. | `next_program_id` dans la **même** structure (clé composite), différent de lui-même (contrainte) ; l'absence de boucle plus longue (A → B → A) est vérifiée par le service. `version` : verrou optimiste pour l'édition simultanée. |
+| `program` | Le programme. | `next_program_id` dans la **même** structure (clé composite), différent de lui-même (contrainte) ; l'absence de boucle plus longue (A → B → A) est vérifiée par le service. `archived_at` (programme avec cohortes) et `deleted_at` (programme sans cohorte, suppression annulable) : voir § 12. `version` : verrou optimiste pour l'édition simultanée. |
 | `program_editor` | Les coachs autorisés à éditer le contenu (décision D6). | Liaison programme–membre. |
 | `step` | Étape ordonnée. | `position` unique parmi les étapes **non supprimées** d'un programme (N8). `deleted_at` permet « Annuler » et garde la trace pour les cohortes qui en ont une copie. |
 | `activity` | Activité ordonnée d'une étape. | **Le livrable attendu est porté par l'activité** (`deliverable_format`, `document_template_id`) : il y en a au plus un, une table séparée en relation 1–0..1 n'apporterait rien. Les contraintes imposent un modèle si et seulement si le format est `DOCUMENT`. `due_offset_days` : échéance relative au début de la cohorte. |
@@ -343,6 +344,9 @@ Trois niveaux, du plus automatique au plus explicite :
 3. **Tests** : un test par module tente de lire, modifier et relier des objets d'une autre
    structure, et doit échouer (étape 6).
 
+Le filtre Hibernate ne couvre pas tout : les requêtes SQL natives, le WebSocket, les traitements
+planifiés et les fichiers sont protégés autrement (§ 15, vérifié par une sonde).
+
 Les tables globales (`user_account`, `refresh_token`, `one_time_token`,
 `notification_preference`, `document_template`, `plan`) ne contiennent aucune donnée
 d'accompagnement.
@@ -357,6 +361,7 @@ Les clés primaires, les contraintes d'unicité et les clés étrangères (MySQL
 | Index | Sert à |
 |---|---|
 | `enrollment (cohort_id, ended_at)` | Projets en cours d'une cohorte, répartition par étape. |
+| `enrollment (project_id, started_at)` | Participation la plus récente d'un projet (écran Projets), chemin du projet. Ajouté après mesure (§ 13). |
 | `deliverable (cohort_id, status)` | Alertes et compteurs par cohorte. |
 | `deliverable_version (deliverable_id, submitted_at)` | Dernière version, attente de retour. |
 | `deliverable_comment (deliverable_id, created_at)` | Fil de commentaires dans l'ordre. |
@@ -442,3 +447,174 @@ plus tard par une migration, sans rien modifier de l'existant :
 - **UUID v7** : générateur Hibernate `@UuidGenerator(style = VERSION_7)` ou équivalent.
 - **Données de démonstration** : le cas Fabrique 360 du produit, chargé en profil `dev` à partir
   de ce schéma.
+
+---
+
+## 12. Suppression et archivage, entité par entité
+
+Rien ne se supprime en cascade (N5). Pour chaque entité, une seule règle :
+
+- **Archiver** (`archived_at`) : masqué des listes, conservé et consultable, réversible.
+- **Mettre fin** (`removed_at`, `revoked_at`, `cancelled_at`, `closed_at`, `ended_at`) : un état
+  métier terminé, conservé pour l'historique.
+- **Corbeille** (`deleted_at`) : masqué immédiatement, restaurable par « Annuler », puis **purgé
+  définitivement** par une tâche quotidienne au bout de 30 jours, **seulement si rien ne le
+  référence**. Sinon il reste en corbeille indéfiniment, car il sert d'origine à une copie.
+- **Vraie suppression** : seulement quand l'élément **n'a aucun historique**, c'est-à-dire rien
+  qui le référence et rien qui ait été produit à partir de lui.
+
+| Entité | Archiver ou mettre fin | Vraie suppression possible si… | Sinon |
+|---|---|---|---|
+| `organization` | `suspended_at` (super-admin) | jamais en phase 1 | suspendre |
+| `user_account` | `disabled_at` | jamais : le compte est référencé par `created_by` | anonymiser (nom et email remplacés) à la demande de la personne |
+| `member` | `removed_at` (« ancien membre ») | aucune référence (aucun livrable, commentaire, participation, séance, invitation envoyée) | retirer |
+| `invitation` | `revoked_at` | jamais : c'est la trace de l'entrée dans la structure | annuler |
+| `program` | `archived_at` s'il a des cohortes | aucune cohorte : corbeille (`deleted_at`, « Annuler »), avec ses étapes et activités | archiver |
+| `step`, `activity` (programme) | — | corbeille ; purgée si aucune copie de cohorte ne la référence | rester en corbeille (origine des copies) |
+| `program_editor`, `cohort_facilitator`, `activity_resource`, `cohort_activity_resource`, `meeting_participant` | — | toujours : ce sont des liaisons sans historique propre | — |
+| `project_holder` | — | toujours (ce que le porteur a produit reste rattaché à son membre) | — |
+| `resource` | `archived_at` si elle est jointe à une activité | jamais jointe | archiver |
+| `stored_file` | — | plus aucune référence (purge automatique des fichiers orphelins) | — |
+| `cohort` | `closed_at` | aucune participation, aucune invitation acceptée, aucune séance (cohorte lancée par erreur) : supprimée avec son contenu copié | clore |
+| `cohort_step`, `cohort_activity` d'origine PROGRAM | `detached_at` (retirée du programme) | aucun livrable ni activité marquée faite (lors de « appliquer les modifications ») | détacher |
+| `cohort_activity` d'origine COHORT ou ENROLLMENT | — | aucun livrable ni activité marquée faite : corbeille (« Annuler »), puis purge | suppression refusée ; proposer « rendre facultative » |
+| `project` | — | aucune participation | jamais supprimé |
+| `enrollment` | `ended_at` + `outcome` | aucun livrable, activité faite, activité ponctuelle ni séance (inscription par erreur) | mettre fin |
+| `activity_completion` | — | toujours (« marquer comme non faite ») | — |
+| `deliverable` | — | aucune version rendue et aucun commentaire (brouillon abandonné) | jamais |
+| `deliverable_version` | — | brouillon (`number` nul) | une version rendue n'est jamais supprimée |
+| `deliverable_comment` | `deleted_at` par l'auteur dans les 15 minutes (« message supprimé ») | jamais | — |
+| `meeting` | `cancelled_at` | jamais | annuler |
+| `ai_conversation` | `archived_at` | à la demande du propriétaire, avec ses messages et actions (le journal `ai_usage` est conservé) | — |
+| `ai_usage`, `subscription`, `payment` | — | jamais (quotas, comptabilité) | — |
+| `plan` | `archived_at` | jamais utilisé | archiver |
+| `notification` | `read_at` | purge automatique au bout de 90 jours | — |
+| `refresh_token`, `one_time_token` | `revoked_at`, `consumed_at` | purge automatique après expiration | — |
+| `notification_preference` | — | toujours (retour aux valeurs par défaut) | — |
+| `document_template` | — | jamais (les documents rendus en dépendent) | — |
+
+Ces règles sont appliquées par les services, et testées module par module (étape 6).
+
+---
+
+## 13. Performance des calculs (mesurée)
+
+Les valeurs calculées (§ 5) ne sont pas stockées : il fallait vérifier qu'elles restent rapides.
+
+**Jeu de charge** (`docs/modele/charge.py`) : 1 structure avec 10 programmes, 30 cohortes
+(10 terminées, 20 en cours), 360 activités de cohorte, 500 projets, 600 participations (dont 100
+promotions), **5 084 livrables**, 3 558 versions, 3 298 commentaires, 689 activités faites ; plus
+une seconde structure « bruit » (120 projets) pour vérifier le filtrage. MySQL 8.4 local, médiane
+de 7 exécutions après 2 de chauffe.
+
+| Requête | Temps médian | Objectif < 300 ms |
+|---|---|---|
+| Tableau de bord d'un programme : cohortes (projets, progression moyenne, coachs) | 10 ms | ✓ |
+| Tableau de bord : alertes (retards, bloqués, retours en attente) | 13 ms | ✓ |
+| Tableau de bord : répartition des projets par étape | 10 ms | ✓ |
+| **Tableau de bord complet** (3 requêtes) | **33 ms** | ✓ |
+| Écran Projets, page de 50, tri par nom (total de pagination inclus) | 141 ms | ✓ |
+| Écran Projets, tri par progression, page 5 | 143 ms | ✓ |
+| Écran Projets, filtre « en retard », tri par retards | 134 ms | ✓ |
+| Écran Projets, filtre « bloqués » | 146 ms | ✓ |
+
+**Ajustements faits pendant la mesure**
+- Le total de la pagination est calculé dans la même requête (`COUNT(*) OVER ()`) : une requête
+  séparée coûtait autant que la page (environ 150 ms) et doublait le temps de l'écran.
+- Index `enrollment (project_id, started_at)` ajouté : environ 10 % de gain sur l'écran Projets.
+
+**Limite connue** : l'écran Projets calcule l'état de tous les projets de la structure avant de
+trier. Le coût croît avec leur nombre (environ 0,3 ms par projet ici), soit environ 300 ms
+vers 1 000 projets actifs dans une même structure. Si une structure approche ce volume, la
+solution prévue est une **table de lecture** (`enrollment_progress` : progression, étape en
+cours, date d'entrée, compteurs), mise à jour dans la même transaction que les événements qui la
+changent (rendu, validation, activité faite). Ce serait un cache reconstructible, pas une source
+de vérité. Ce n'est pas nécessaire en phase 1.
+
+**Requêtes** : elles sont écrites dans `charge.py` (blocs `STATE`, `Q_COHORTS`, `Q_ALERTS`,
+`Q_DISTRIBUTION`, `Q_PROJECTS`) et serviront de base au module de lecture du back-end
+(§ 15.1). Toutes filtrent explicitement sur `organization_id` ; la structure bruit voit
+exactement ses 120 projets.
+
+---
+
+## 14. Identifiants : un seul mapping UUID ↔ `BINARY(16)`
+
+**Constat** (sonde Hibernate 7.4 sur MySQL 8.4) : un attribut Java `UUID` est déjà stocké en
+`binary(16)` par défaut, et de même avec le réglage explicite. L'ancien bug venait d'un
+identifiant déclaré en `String` (conversations en `varchar(36)`), pas du mapping.
+
+**Règle**
+1. Tout identifiant et toute référence sont de type `java.util.UUID`. Aucun identifiant en
+   `String` ou `byte[]`.
+2. Réglage global explicite, pour ne pas dépendre d'un défaut :
+   `spring.jpa.properties.hibernate.type.preferred_uuid_jdbc_type=BINARY`.
+3. Une seule classe de base porte l'identifiant (`@Id`, générateur UUID v7) et les colonnes
+   d'audit ; aucune entité ne déclare son propre `@Id`.
+4. Côté API, les identifiants circulent en texte (format UUID standard) ; la conversion est faite
+   une seule fois, par Jackson et Spring.
+
+**Tests (premiers tests écrits à l'étape 6)**
+- **Test du métamodèle** : démarre Hibernate, parcourt toutes les entités, et échoue si un
+  identifiant ou un attribut terminé par `Id` n'est pas de type `UUID`, ou si son type JDBC n'est
+  pas `BINARY`.
+- **Test d'architecture** : échoue si une classe annotée `@Entity` ne descend pas de la classe de
+  base, ou si un `@Id` est déclaré ailleurs.
+- **Validation du schéma** : `ddl-auto=validate` au démarrage compare chaque colonne au mapping ;
+  un `String` face à un `binary(16)` empêche l'application de démarrer.
+
+---
+
+## 15. Isolation hors du filtre Hibernate
+
+**Constat** (même sonde, deux structures A et B, session ouverte pour B) :
+
+| Accès | Résultat |
+|---|---|
+| Requête HQL ou Criteria | filtrée : 0 ligne de A |
+| Lecture par identifiant (`find`) d'un objet de A | `null` : protégé |
+| Insertion par B d'un objet marqué « structure A » | refusée par Hibernate |
+| `organization_id` à l'insertion | renseigné automatiquement |
+| **Requête SQL native** | **non filtrée : voit les lignes de A** |
+
+Le filtre est donc fiable pour tout ce qui passe par les entités. Les autres chemins sont protégés
+ainsi :
+
+### 15.1 Requêtes SQL natives
+
+- Autorisées **uniquement** dans un module de lecture dédié (tableau de bord, écran Projets,
+  alertes : les requêtes du § 13). Interdites partout ailleurs.
+- Chaque méthode de ce module reçoit la structure en premier paramètre, fournie par le contexte
+  de sécurité et jamais par la requête HTTP ; chaque requête filtre sur `organization_id` pour
+  **chaque** table de structure qu'elle lit.
+- Tests : un test d'architecture refuse toute requête native hors de ce module ; un test
+  d'isolation rejoue chaque requête de lecture avec deux structures et vérifie qu'aucune ligne
+  de l'autre structure n'apparaît (comme la vérification « bruit » du § 13).
+- La base ajoute une seconde barrière : les clés composites empêchent qu'une jointure relie deux
+  structures.
+
+### 15.2 WebSocket
+
+- Le WebSocket ne passe pas par Hibernate : il est protégé à la connexion et à l'abonnement.
+- **Connexion** (`CONNECT`) : jeton d'accès obligatoire, vérifié comme pour l'API ; sinon refus.
+- **Abonnement** : seulement aux destinations **personnelles** (`/user/queue/...`), résolues par
+  Spring à partir de l'utilisateur authentifié. Aucun canal par structure ou par cohorte qu'on
+  pourrait deviner (corrige la faille S1 de l'audit) : quand un événement concerne plusieurs
+  personnes, le serveur l'envoie à chacune.
+- Chaque message porte l'identifiant de la structure ; le front-end ignore ceux d'une autre
+  structure que celle active.
+- Tests : connexion sans jeton refusée ; abonnement à la destination d'un autre utilisateur
+  refusé ; un événement de A n'atteint aucun membre de B.
+
+### 15.3 Traitements planifiés
+
+Expiration des abonnements, purges, rappels d'échéance : ils tournent hors de toute requête,
+donc sans structure active. Chacun **parcourt les structures et ouvre une session par
+structure**. Un seul composant, réservé aux tâches d'administration (purges), peut ouvrir une
+session sans filtre ; il est couvert par un test d'architecture.
+
+### 15.4 Fichiers
+
+Un fichier n'est jamais servi par son chemin : le téléchargement passe par une route de l'API qui
+lit `stored_file` (donc filtrée) puis renvoie le contenu, avec `Content-Disposition` et le type
+détecté. Les noms de stockage sont aléatoires et rangés par structure.

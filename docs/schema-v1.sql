@@ -173,6 +173,7 @@ CREATE TABLE program (
     description        TEXT         NULL,
     next_program_id    BINARY(16)   NULL,
     archived_at        DATETIME(6)  NULL,
+    deleted_at         DATETIME(6)  NULL,
     version            INT          NOT NULL DEFAULT 0,
     created_at         DATETIME(6)  NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
     updated_at         DATETIME(6)  NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6),
@@ -413,6 +414,7 @@ CREATE TABLE enrollment (
     CONSTRAINT uk_enrollment_one_active_per_project UNIQUE (active_project_id),
     CONSTRAINT uk_enrollment_promoted_to UNIQUE (promoted_to_enrollment_id),
     INDEX ix_enrollment_cohort_ended (cohort_id, ended_at),
+    INDEX ix_enrollment_project_started (project_id, started_at),
     CONSTRAINT ck_enrollment_end CHECK ((ended_at IS NULL) = (outcome IS NULL) AND (ended_at IS NULL) = (ended_by_member_id IS NULL)),
     CONSTRAINT ck_enrollment_promotion CHECK (promoted_to_enrollment_id IS NULL OR outcome = 'COMPLETED'),
     CONSTRAINT fk_enrollment_created_by FOREIGN KEY (created_by) REFERENCES user_account (id)

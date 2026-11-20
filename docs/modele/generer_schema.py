@@ -184,6 +184,7 @@ table(t, [
     "description        TEXT         NULL",
     "next_program_id    BINARY(16)   NULL",
     "archived_at        DATETIME(6)  NULL",
+    "deleted_at         DATETIME(6)  NULL",
     "version            INT          NOT NULL DEFAULT 0",
 ], [
     fk(t, "next_program_id", "program", "next_program"),
@@ -347,6 +348,7 @@ table(t, [
     uk(t, "one_active_per_project", "active_project_id"),
     uk(t, "promoted_to", "promoted_to_enrollment_id"),
     ix(t, "cohort_ended", "cohort_id, ended_at"),
+    ix(t, "project_started", "project_id, started_at"),
     ck(t, "end", "(ended_at IS NULL) = (outcome IS NULL) AND (ended_at IS NULL) = (ended_by_member_id IS NULL)"),
     ck(t, "promotion", "promoted_to_enrollment_id IS NULL OR outcome = 'COMPLETED'"),
 ], comment="Participation d'un projet a une cohorte. En cours tant que ended_at est nul ; une seule en cours par projet.")
