@@ -1,0 +1,463 @@
+package sn.jappo.jappo_backend.ia.service;
+
+
+import sn.jappo.jappo_backend.abonnement.service.QuotaService;
+
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import org.springframework.http.HttpStatus;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.server.ResponseStatusException;
+import sn.jappo.jappo_backend.config.tenant.TenantContext;
+import sn.jappo.jappo_backend.ia.context.AiContext;
+import sn.jappo.jappo_backend.ia.context.AiContextBuilder;
+import sn.jappo.jappo_backend.ia.context.AiResourceContextService;
+import sn.jappo.jappo_backend.ia.context.ConversationContexte;
+import sn.jappo.jappo_backend.ia.dto.*;
+import sn.jappo.jappo_backend.ia.entity.Auteur;
+import sn.jappo.jappo_backend.ia.entity.Conversation;
+import sn.jappo.jappo_backend.ia.entity.Message;
+import sn.jappo.jappo_backend.ia.repository.ConversationRepository;
+import sn.jappo.jappo_backend.ia.repository.MessageRepository;
+import sn.jappo.jappo_backend.structure.entity.Structure;
+import sn.jappo.jappo_backend.structure.entity.RoleMembreStructure;
+import sn.jappo.jappo_backend.structure.repository.StructureRepository;
+import sn.jappo.jappo_backend.user.entity.User;
+import sn.jappo.jappo_backend.user.repository.UserRepository;
+import sn.jappo.jappo_backend.ia.action.AiActionService;
+
+import java.time.LocalDateTime;
+import java.util.List;
+import java.util.UUID;
+
+/**
+ * Orchestre le pipeline de l'Assistant IA :
+ *
+ * POST /api/conversations → createConversation
+ * GET /api/conversations/{id} → getConversation
+ * POST /api/conversations/{id}/messages → sendMessage
+ * PATCH /api/conversations/{id}/contexte → updateContexte
+ *
+ * Pipeline sendMessage :
+ * 1. Vérifier auth + tenant
+ * 2. Charger la conversation (tenant-safe)
+ * 3. Enregistrer le message COACH
+ * 4. Construire AiContext (AiContextBuilder)
+ * 5. Appeler AiService (FakeAiService pour l'instant)
+ * 6. Enregistrer le message ASSISTANT
+ * 7. Retourner les deux messages
+ */
+@Service
+public class ConversationIaService {
+
+    private final ConversationRepository conversationRepository;
+    private final MessageRepository messageRepository;
+    private final StructureRepository structureRepository;
+    private final UserRepository userRepository;
+    private final AiContextBuilder aiContextBuilder;
+    private final AiService aiService;
+    private final AiActionService aiActionService;
+    private final ObjectMapper objectMapper = new ObjectMapper();
+    private final QuotaService quotaService;
+
+    public ConversationIaService(
+        ConversationRepository conversationRepository,
+        MessageRepository messageRepository,
+        StructureRepository structureRepository,
+        UserRepository userRepository,
+        AiContextBuilder aiContextBuilder,
+        AiService aiService,
+        AiActionService aiActionService,
+        QuotaService quotaService) {
+
+    this.conversationRepository = conversationRepository;
+    this.messageRepository = messageRepository;
+    this.structureRepository = structureRepository;
+    this.userRepository = userRepository;
+    this.aiContextBuilder = aiContextBuilder;
+    this.aiService = aiService;
+    this.aiActionService = aiActionService;
+    this.quotaService = quotaService;
+}
+
+    // ── Création d'une conversation ──────────────────────────────────────────
+
+    @Transactional
+    public ConversationResponse createConversation(User utilisateur, CreateConversationRequest request) {
+        UUID structureId = getRequiredTenantId();
+
+        requireAuthenticatedUser(utilisateur);
+        quotaService.verifierAccesIA(structureId, utilisateur);
+
+        Structure structure = structureRepository.findById(structureId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Structure introuvable"));
+
+        Conversation conversation = new Conversation();
+        conversation.setStructure(structure);
+        conversation.setCoach(utilisateur);
+
+        // Sérialiser le contexte en JSON
+        ConversationContexte contexte = request != null && request.contexte() != null
+                ? request.contexte()
+                : new ConversationContexte();
+        conversation.setContexteJson(toJson(contexte));
+
+        // Définir le titre si fourni, sinon null
+        if (request != null && request.titre() != null && !request.titre().isBlank()) {
+            conversation.setTitre(request.titre());
+        }
+
+        Conversation saved = conversationRepository.save(conversation);
+        return mapToResponse(saved, List.of());
+    }
+
+    // ── Récupération d'une conversation + ses messages ───────────────────────
+
+    @Transactional(readOnly = true)
+    public ConversationResponse getConversation(UUID conversationId, User utilisateur) {
+        UUID structureId = getRequiredTenantId();
+
+        Conversation conversation = findOwnedConversation(conversationId, structureId, utilisateur);
+
+        List<Message> messages = messageRepository
+                .findAllByConversationIdOrderByDateEnvoiAsc(conversationId);
+
+        return mapToResponse(conversation, messages);
+    }
+
+    // ── Envoi d'un message et génération de la réponse ───────────────────────
+
+    @Transactional
+    public List<MessageResponse> sendMessage(UUID conversationId, User utilisateur, SendMessageRequest request) {
+        UUID structureId = getRequiredTenantId();
+        requireAuthenticatedUser(utilisateur);
+
+        if (request == null || request.contenu() == null || request.contenu().isBlank()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Le contenu du message ne peut pas être vide");
+        }
+        if (request.contenu().length() > 8_000) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Le message dépasse la taille maximale autorisée");
+        }
+
+        // 1. Charger et vérifier la conversation (tenant-safe)
+        Conversation conversation = findOwnedConversation(conversationId, structureId, utilisateur);
+
+        // Quota avant tout appel IA : rôle autorisé par le plan et pot de tokens non épuisé.
+        // La lecture des conversations existantes, elle, reste toujours possible.
+        RoleMembreStructure roleUtilisateur = quotaService.verifierAccesIA(structureId, utilisateur);
+
+        // 2. Enregistrer le message COACH
+        Message messageCoach = new Message();
+        messageCoach.setConversation(conversation);
+        messageCoach.setAuteur(Auteur.COACH);
+        messageCoach.setContenu(request.contenu().trim());
+        messageCoach.setSourcesJson("[]");
+        messageCoach.setActionsJson("[]");
+        Message savedCoach = messageRepository.save(messageCoach);
+        if (conversation.getTitre() == null || conversation.getTitre().isBlank()) {
+    conversation.setTitre(genererTitreDepuisMessage(messageCoach.getContenu()));
+}
+
+        // 3. Mettre à jour la date de dernière activité de la conversation
+        conversation.setDateDerniereActivite(java.time.LocalDateTime.now());
+        conversationRepository.save(conversation);
+
+        // 4. Construire le AiContext à partir du contexte sélectionné
+        ConversationContexte contexte = fromJson(conversation.getContexteJson());
+        AiContext aiContext = aiContextBuilder.build(structureId, contexte, utilisateur);
+
+        // 5. Charger l'historique pour le transmettre au modèle
+        List<Message> historique = messageRepository
+                .findAllByConversationIdOrderByDateEnvoiAsc(conversationId);
+
+        // 6. Générer la réponse via AiService (HttpAiService en fonctionnement normal)
+        AiService.AiResponse reponse = aiService.generateResponse(request.contenu().trim(), aiContext, historique);
+
+        // 7. Enregistrer le message ASSISTANT
+        Message messageAssistant = new Message();
+        messageAssistant.setConversation(conversation);
+        messageAssistant.setAuteur(Auteur.ASSISTANT);
+        messageAssistant.setContenu(reponse.content());
+        messageAssistant.setModel(reponse.model());
+        messageAssistant.setSourcesJson(toJson(secureCitationUrls(aiContext, conversationId, reponse.sources())));
+
+        Message savedAssistant = messageRepository.save(messageAssistant);
+
+        // Usage réel de la réponse (un appel échoué ne consomme rien).
+        quotaService.enregistrerUsage(structureId, utilisateur.getId(), roleUtilisateur, conversationId, reponse);
+
+        // 8. Enregistrer les actions IA et récupérer les actions avec leurs IDs BDD
+        List<java.util.Map<String, Object>> actionsEnregistrees = List.of();
+
+        if (!RoleMembreStructure.ENTREPRENEUR.name().equals(aiContext.getUserRole())
+                && reponse.success()
+                && reponse.actions() != null
+                && !reponse.actions().isEmpty()) {
+
+            actionsEnregistrees = aiActionService.enregistrerPropositions(
+                    structureId,
+                    savedAssistant.getId(),
+                    reponse.actions());
+        }
+
+        // 9. Sauvegarder dans le message assistant les actions enrichies avec leurs IDs
+        savedAssistant.setActionsJson(toJson(actionsEnregistrees));
+        messageRepository.save(savedAssistant);
+
+        return List.of(mapMessage(savedCoach), mapMessage(savedAssistant));
+    }
+
+    @Transactional(readOnly = true)
+    public AiResourceContextService.ResourceFile getEntrepreneurSourceFile(
+            UUID conversationId, UUID sourceId, User utilisateur) {
+        UUID structureId = getRequiredTenantId();
+        Conversation conversation = findOwnedConversation(conversationId, structureId, utilisateur);
+        return aiContextBuilder.loadEntrepreneurSourceFile(
+                structureId, fromJson(conversation.getContexteJson()), utilisateur, sourceId);
+    }
+
+    private List<java.util.Map<String, Object>> secureCitationUrls(
+            AiContext context, UUID conversationId, List<java.util.Map<String, Object>> citations) {
+        if (citations == null || citations.isEmpty()) {
+            return List.of();
+        }
+        return citations.stream()
+                .map(citation -> {
+                    Object rawId = citation.get("id");
+                    if (rawId == null) {
+                        return null;
+                    }
+                    String id = rawId.toString();
+                    AiContext.SourceContext source = context.getSources().stream()
+                            .filter(allowed -> allowed.id.toString().equals(id))
+                            .findFirst()
+                            .orElse(null);
+                    if (source == null) {
+                        return null;
+                    }
+                    java.util.Map<String, Object> canonical = new java.util.HashMap<>();
+                    canonical.put("id", source.id.toString());
+                    canonical.put("title", source.title);
+                    canonical.put("snippet", source.snippet);
+                    String url = source.url;
+                    if (url != null && url.startsWith("/fichiers/ressources/")) {
+                        url = "/api/conversations/" + conversationId + "/sources/" + source.id;
+                    }
+                    canonical.put("url", url);
+                    return canonical;
+                })
+                .filter(java.util.Objects::nonNull)
+                .toList();
+    }
+
+    // ── Mise à jour du contexte ──────────────────────────────────────────────
+
+    @Transactional
+    public ConversationResponse updateContexte(UUID conversationId, UpdateContexteRequest request, User utilisateur) {
+        UUID structureId = getRequiredTenantId();
+
+        Conversation conversation = findOwnedConversation(conversationId, structureId, utilisateur);
+
+        ConversationContexte newContexte = new ConversationContexte(
+                request.cohorteId(),
+                request.projetId(),
+                request.entrepreneurId(),
+                request.missionId());
+        conversation.setContexteJson(toJson(newContexte));
+        conversationRepository.save(conversation);
+
+        List<Message> messages = messageRepository
+                .findAllByConversationIdOrderByDateEnvoiAsc(conversationId);
+
+        return mapToResponse(conversation, messages);
+    }
+
+    // ── Listing des conversations du coach ───────────────────────────────────
+
+    @Transactional(readOnly = true)
+    public List<ConversationResponse> listConversations(User utilisateur) {
+        UUID structureId = getRequiredTenantId();
+        requireAuthenticatedUser(utilisateur);
+        return conversationRepository
+                .findAllByStructureIdAndCoachIdAndArchiveeFalseOrderByDateDerniereActiviteDesc(structureId,
+                        utilisateur.getId())
+                .stream()
+                .map(c -> mapToResponse(c, List.of()))
+                .toList();
+    }
+
+    @Transactional(readOnly = true)
+    public List<ConversationResponse> listArchivedConversations(User utilisateur) {
+        UUID structureId = getRequiredTenantId();
+        requireAuthenticatedUser(utilisateur);
+        return conversationRepository
+                .findAllByStructureIdAndCoachIdAndArchiveeTrue(structureId, utilisateur.getId())
+                .stream()
+                .map(c -> mapToResponse(c, List.of()))
+                .toList();
+    }
+
+    @Transactional(readOnly = true)
+    public List<ConversationResponse> listRecentConversations(User utilisateur, LocalDateTime since) {
+        UUID structureId = getRequiredTenantId();
+        requireAuthenticatedUser(utilisateur);
+        return conversationRepository
+                .findAllByStructureIdAndCoachIdAndDateCreationAfter(structureId, utilisateur.getId(), since)
+                .stream()
+                .map(c -> mapToResponse(c, List.of()))
+                .toList();
+    }
+
+    // ── Gestion des conversations ─────────────────────────────────────────────
+
+    @Transactional
+    public ConversationResponse renameConversation(UUID conversationId, String nouveauTitre, User utilisateur) {
+        UUID structureId = getRequiredTenantId();
+
+        Conversation conversation = findOwnedConversation(conversationId, structureId, utilisateur);
+
+        conversation.setTitre(nouveauTitre);
+        Conversation saved = conversationRepository.save(conversation);
+
+        List<Message> messages = messageRepository
+                .findAllByConversationIdOrderByDateEnvoiAsc(conversationId);
+
+        return mapToResponse(saved, messages);
+    }
+
+    @Transactional
+    public void archiveConversation(UUID conversationId, User utilisateur) {
+        UUID structureId = getRequiredTenantId();
+
+        Conversation conversation = findOwnedConversation(conversationId, structureId, utilisateur);
+
+        conversation.setArchivee(true);
+        conversationRepository.save(conversation);
+    }
+
+    @Transactional
+    public void restaurerConversation(UUID conversationId, User utilisateur) {
+        UUID structureId = getRequiredTenantId();
+
+        Conversation conversation = findOwnedConversation(conversationId, structureId, utilisateur);
+
+        conversation.setArchivee(false);
+        conversationRepository.save(conversation);
+    }
+
+    @Transactional
+    public void deleteConversation(UUID conversationId, User utilisateur) {
+        UUID structureId = getRequiredTenantId();
+
+        Conversation conversation = findOwnedConversation(conversationId, structureId, utilisateur);
+
+        conversationRepository.delete(conversation);
+    }
+
+    // ── Helpers ──────────────────────────────────────────────────────────────
+
+    private Conversation findOwnedConversation(UUID conversationId, UUID structureId, User utilisateur) {
+        requireAuthenticatedUser(utilisateur);
+        // coach_id est le propriétaire/créateur historique de la conversation,
+        // quel que soit le rôle (coach ou entrepreneur) de cet utilisateur.
+        return conversationRepository
+                .findByIdAndStructureIdAndCoachId(conversationId, structureId, utilisateur.getId())
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND,
+                        "Conversation introuvable ou accès non autorisé"));
+    }
+
+    private void requireAuthenticatedUser(User utilisateur) {
+        if (utilisateur == null || utilisateur.getId() == null) {
+            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Authentification requise");
+        }
+    }
+
+
+    private String genererTitreDepuisMessage(String contenu) {
+    if (contenu == null || contenu.isBlank()) {
+        return "Nouvelle conversation";
+    }
+
+    String titre = contenu
+            .trim()
+            .replaceAll("\\s+", " ");
+
+    // Supprimer le point final pour éviter les titres du genre ".... ?."
+    titre = titre.replaceAll("[.!]+$", "");
+
+    // Limiter la longueur
+    if (titre.length() > 60) {
+        titre = titre.substring(0, 57).trim() + "...";
+    }
+
+    return titre;
+}
+    private UUID getRequiredTenantId() {
+        UUID tenantId = TenantContext.getCurrentTenant();
+        if (tenantId == null) {
+            throw new ResponseStatusException(
+                    org.springframework.http.HttpStatus.UNAUTHORIZED,
+                    "Aucune structure active (en-tête X-Structure-Id manquant ou invalide)");
+        }
+        return tenantId;
+    }
+
+    private String toJson(ConversationContexte contexte) {
+        try {
+            return objectMapper.writeValueAsString(contexte);
+        } catch (JsonProcessingException e) {
+            return "{}";
+        }
+    }
+
+    private String toJson(List<java.util.Map<String, Object>> list) {
+        if (list == null || list.isEmpty()) {
+            return "[]";
+        }
+        try {
+            return objectMapper.writeValueAsString(list);
+        } catch (JsonProcessingException e) {
+            return "[]";
+        }
+    }
+
+    private ConversationContexte fromJson(String json) {
+        if (json == null || json.isBlank() || json.equals("{}")) {
+            return new ConversationContexte();
+        }
+        try {
+            return objectMapper.readValue(json, ConversationContexte.class);
+        } catch (JsonProcessingException e) {
+            return new ConversationContexte();
+        }
+    }
+
+    private ConversationResponse mapToResponse(Conversation c, List<Message> messages) {
+        ConversationContexte contexte = fromJson(c.getContexteJson());
+        List<MessageResponse> msgResponses = messages.stream().map(this::mapMessage).toList();
+        return new ConversationResponse(
+                c.getId(),
+                c.getStructure().getId(),
+                c.getCoach().getId(),
+                contexte,
+                c.getTitre(),
+                c.getArchivee(),
+                c.getDateCreation(),
+                c.getDateModification(),
+                c.getDateDerniereActivite(),
+                msgResponses);
+    }
+
+    private MessageResponse mapMessage(Message m) {
+        return new MessageResponse(
+                m.getId(),
+                m.getConversation().getId(),
+                m.getAuteur(),
+                m.getContenu(),
+                m.getDateEnvoi(),
+                m.getModel(),
+                m.getSourcesJson(),
+                m.getActionsJson());
+    }
+}
